@@ -83,20 +83,31 @@ ALTER TABLE collaborator_states
     DROP CONSTRAINT collaborator_states_collaborator_id_fkey;
 
 
--- Первичные ключи. USING не важен — таблицы пусты.
+-- IDENTITY снимаем отдельными инструкциями: в одном ALTER TABLE со
+-- сменой типа PostgreSQL отказывает (identity column type must be
+-- smallint, integer, or bigint).
+ALTER TABLE orgs ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE cost_centers ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE subdivisions ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE boss_types ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE position_commons ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE collaborators ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE positions ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE func_managers ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE collaborator_position_history ALTER COLUMN id DROP IDENTITY;
+ALTER TABLE collaborator_states ALTER COLUMN id DROP IDENTITY;
+
+-- Первичные ключи и ссылки. USING не важен — таблицы пусты.
 ALTER TABLE orgs
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 ALTER TABLE cost_centers
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN parent_id TYPE uuid USING NULL;
 
 ALTER TABLE subdivisions
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN org_id TYPE uuid USING NULL,
@@ -104,23 +115,19 @@ ALTER TABLE subdivisions
     ALTER COLUMN cost_center_id TYPE uuid USING NULL;
 
 ALTER TABLE boss_types
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 ALTER TABLE position_commons
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 ALTER TABLE collaborators
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN cost_center_id TYPE uuid USING NULL;
 
 ALTER TABLE positions
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN subdivision_id TYPE uuid USING NULL,
@@ -128,7 +135,6 @@ ALTER TABLE positions
     ALTER COLUMN position_common_id TYPE uuid USING NULL;
 
 ALTER TABLE func_managers
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN person_id TYPE uuid USING NULL,
@@ -139,7 +145,6 @@ ALTER TABLE func_managers
     ALTER COLUMN cost_center_id TYPE uuid USING NULL;
 
 ALTER TABLE collaborator_position_history
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN collaborator_id TYPE uuid USING NULL,
@@ -148,7 +153,6 @@ ALTER TABLE collaborator_position_history
     ALTER COLUMN org_id TYPE uuid USING NULL;
 
 ALTER TABLE collaborator_states
-    ALTER COLUMN id DROP IDENTITY,
     ALTER COLUMN id TYPE uuid USING gen_random_uuid(),
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
     ALTER COLUMN collaborator_id TYPE uuid USING NULL;
