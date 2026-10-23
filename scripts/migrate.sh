@@ -12,9 +12,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Ключ advisory-блокировки: два одновременных запуска не применят одну
-# миграцию дважды — второй дождётся первого и упадёт на записи в журнал.
+# Ключ advisory-блокировки. Одновременные запуски выполняют миграции по
+# очереди: получив блокировку, процесс заново смотрит журнал и пропускает
+# миграцию, если её уже применил другой.
 lock_key=20260101
+skip_mark="MIGRATION_ALREADY_APPLIED"
 
 psql_db() {
     docker compose exec -T db \
@@ -40,12 +42,34 @@ for file in postgres/migrations/*.sql; do
 
     echo "Применяю $version"
 
-    {
-        echo "DO \$\$ BEGIN PERFORM pg_advisory_xact_lock($lock_key); END \$\$;"
-        echo "INSERT INTO public.schema_migrations ( version )"
-        echo "VALUES ( '$version' );"
-        cat "$file"
-    } | psql_db --single-transaction -f -
+    # Блокировка, повторная проверка журнала, запись версии и SQL
+    # миграции — в одной транзакции.
+    out=$(
+        {
+            echo "SELECT pg_advisory_xact_lock($lock_key) \\gset"
+            echo "SELECT EXISTS ("
+            echo "    SELECT 1 FROM public.schema_migrations"
+            echo "    WHERE version = '$version'"
+            echo ") AS is_applied \\gset"
+            echo "\\if :is_applied"
+            echo "\\echo $skip_mark"
+            echo "\\else"
+            echo "INSERT INTO public.schema_migrations ( version )"
+            echo "VALUES ( '$version' );"
+            cat "$file"
+            echo
+            echo "\\endif"
+        } | psql_db --single-transaction -f -
+    )
+
+    if [[ "$out" == "$skip_mark" ]]; then
+        echo "  уже применена другим процессом, пропускаю"
+        continue
+    fi
+
+    if [[ -n "$out" ]]; then
+        echo "$out"
+    fi
 
     count=$((count + 1))
 done
