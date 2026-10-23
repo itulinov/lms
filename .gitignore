@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node.js
+**/node_modules/
+**/dist/
+
+# PostgreSQL
+pgdata/
+postgres/data/
+backups/
+*.dump
+
+# Logs
+*.log

@@ -1,0 +1,47 @@
+name: corporate-lms
+services:
+  portal:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./portal:/usr/share/nginx/html:ro
+  admin:
+    build: ./admin
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    depends_on:
+      - api
+  api:
+    build: ./api
+    restart: unless-stopped
+    ports:
+      - "8083:8080"
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: lms
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: lms
+      PGSSLMODE: disable
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lms
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: lms
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lms -d lms"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+volumes:
+  pgdata:

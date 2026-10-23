@@ -1,0 +1,23 @@
+:root { font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; color: #202b3b; background: #f4f6fa; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.layout { display: flex; min-height: 100vh; }
+.sidebar { width: 248px; background: #17243b; color: #fff; padding: 28px 18px; }
+.brand { font-size: 19px; font-weight: 700; padding: 0 12px 28px; }
+.brand small { font-weight: 400; font-size: 12px; display: block; opacity: .65; margin-top: 5px; }
+nav { display: grid; gap: 6px; }
+nav a, nav span { display: block; padding: 11px 12px; border-radius: 8px; font-size: 14px; color: #dae2ef; text-decoration: none; }
+nav .active { background: #30415f; color: white; }
+nav span { opacity: .58; }
+.content { flex: 1; padding: 52px min(6vw, 80px); }
+.eyebrow { color: #5273a6; text-transform: uppercase; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+h1 { font-size: clamp(26px, 4vw, 38px); margin: 10px 0; }
+.intro { color: #68758a; max-width: 620px; line-height: 1.6; }
+.panel { margin-top: 36px; background: white; border: 1px solid #e1e7f0; border-radius: 14px; padding: 28px; max-width: 670px; box-shadow: 0 8px 20px #1d385408; }
+h2 { margin: 0 0 20px; font-size: 19px; }
+.success { color: #17804e; font-weight: 600; }
+.error { color: #ac3434; overflow-wrap: anywhere; }
+button { border: 0; background: #295cb5; color: white; padding: 11px 17px; border-radius: 8px; cursor: pointer; margin-top: 8px; }
+button:hover { background: #194a9d; }
+.note { font-size: 13px; color: #758196; margin-top: 18px; }
+@media (max-width: 680px) { .layout { display: block; } .sidebar { width: auto; } .content { padding: 30px 20px; } }
