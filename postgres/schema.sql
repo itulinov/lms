@@ -191,8 +191,9 @@ CREATE INDEX ON func_managers ( collaborator_id );
 -- открепление, смена основной должности; пишется триггерами. Названия —
 -- снимок на дату события, поэтому хранятся тут же; на должность внешнего
 -- ключа нет: в WebSoft старые должности могли быть удалены.
--- date — кадровая дата события, created_at — время записи; created_at
--- из clock_timestamp(): события одной транзакции идут в порядке записи.
+-- date — кадровая дата события, created_at — время записи (из
+-- clock_timestamp(), а не времени начала транзакции). Порядок событий —
+-- по event_seq: время может совпасть, id — uuid.
 CREATE TABLE collaborator_position_history (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     collaborator_id   uuid NOT NULL REFERENCES collaborators,
@@ -207,7 +208,8 @@ CREATE TABLE collaborator_position_history (
     org_id            uuid,
     org_name          text,
     comment           text,
-    created_at        timestamptz NOT NULL DEFAULT clock_timestamp()
+    created_at        timestamptz NOT NULL DEFAULT clock_timestamp(),
+    event_seq         bigint GENERATED ALWAYS AS IDENTITY
 );
 
 CREATE INDEX ON collaborator_position_history ( collaborator_id );

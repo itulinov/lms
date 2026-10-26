@@ -42,8 +42,9 @@ WHERE p.collaborator_id = c.id
 ALTER TABLE positions DROP COLUMN is_main;
 
 
--- date — кадровая дата события, created_at — время записи. created_at
--- из clock_timestamp(): события одной транзакции идут в порядке записи.
+-- date — кадровая дата события, created_at — время записи (из
+-- clock_timestamp(), а не времени начала транзакции). Порядок событий —
+-- по event_seq: время может совпасть, id — uuid.
 -- Удаление сотрудника больше не стирает его историю.
 ALTER TABLE collaborator_position_history
     ALTER COLUMN date TYPE date,
@@ -51,6 +52,7 @@ ALTER TABLE collaborator_position_history
         CHECK ( event_type IN (
             'assigned', 'unassigned', 'main_set', 'main_unset' ) ),
     ADD COLUMN created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    ADD COLUMN event_seq bigint GENERATED ALWAYS AS IDENTITY,
     DROP CONSTRAINT collaborator_position_history_collaborator_id_fkey,
     ADD FOREIGN KEY ( collaborator_id ) REFERENCES collaborators;
 
