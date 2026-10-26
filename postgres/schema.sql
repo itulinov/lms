@@ -93,8 +93,9 @@ CREATE TABLE position_commons (
 );
 
 
--- Сотрудник. Должность и подразделение здесь не хранятся — они приходят
--- через positions (см. v_collaborators).
+-- Сотрудник. Должностей может быть несколько — они в positions;
+-- main_position_id — основная из них (в WebSoft collaborator.position_id),
+-- ключ на неё добавлен после positions (см. v_collaborators).
 -- data: phone, mobile_phone, snils, pict_url, custom {} (custom_elems
 -- WebSoft: массив пар name/value превращается в объект).
 CREATE TABLE collaborators (
@@ -116,17 +117,21 @@ CREATE TABLE collaborators (
     dismiss_date    date,
     is_dismiss      boolean NOT NULL DEFAULT false,
     cost_center_id  uuid REFERENCES cost_centers,
+    main_position_id  uuid,
     data            jsonb NOT NULL DEFAULT '{}',
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
 
--- Должность — конкретное место в подразделении, занятое одним
--- сотрудником или вакантное. После ухода сотрудника запись остаётся:
--- на неё ссылается история переводов.
--- is_main — основная должность сотрудника (в WebSoft это
--- collaborator.position_id); у человека она одна.
+-- Должность — штатная единица в подразделении, занятая одним
+-- сотрудником или вакантная. Не удаляется (триггер forbid_delete):
+-- должность закрывают статусом, сотрудника открепляют, а прежние
+-- закрепления остаются в collaborator_position_history.
+-- assignment_start_date — с какой даты занята текущим сотрудником,
+-- assignment_finish_date — с какой даты вакантна. Ставятся вместе со
+-- сменой collaborator_id; без даты берётся current_date.
+-- start_date / finish_date — срок жизни штатной единицы.
 -- data: custom {}.
 CREATE TABLE positions (
     id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -134,22 +139,27 @@ CREATE TABLE positions (
     name                text NOT NULL,
     subdivision_id      uuid NOT NULL REFERENCES subdivisions,
     collaborator_id     uuid REFERENCES collaborators,
-    is_main             boolean NOT NULL DEFAULT false,
     position_common_id  uuid REFERENCES position_commons,
     is_boss             boolean NOT NULL DEFAULT false,
     status              text NOT NULL DEFAULT 'active'
         CHECK ( status IN ( 'active', 'plan', 'project', 'close', 'cancel' ) ),
     start_date          date,
     finish_date         date,
+    assignment_start_date   date,
+    assignment_finish_date  date,
     data                jsonb NOT NULL DEFAULT '{}',
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
-    CHECK ( NOT is_main OR collaborator_id IS NOT NULL )
+    UNIQUE ( id, collaborator_id )
 );
 
 CREATE INDEX ON positions ( subdivision_id );
 CREATE INDEX ON positions ( collaborator_id );
-CREATE UNIQUE INDEX ON positions ( collaborator_id ) WHERE is_main;
+
+-- Составной ключ: основная должность принадлежит этому же сотруднику.
+ALTER TABLE collaborators
+    ADD FOREIGN KEY ( main_position_id, id )
+        REFERENCES positions ( id, collaborator_id );
 
 
 -- Руководитель объекта: сотрудника, подразделения, организации или
@@ -177,24 +187,31 @@ CREATE INDEX ON func_managers ( subdivision_id );
 CREATE INDEX ON func_managers ( collaborator_id );
 
 
--- История переводов (change_logs в WebSoft). Названия — снимок на дату
--- перевода, поэтому хранятся тут же; на должность внешнего ключа нет:
--- старые должности могли быть удалены.
+-- История закреплений (change_logs в WebSoft): прикрепление,
+-- открепление, смена основной должности; пишется триггерами. Названия —
+-- снимок на дату события, поэтому хранятся тут же; на должность внешнего
+-- ключа нет: в WebSoft старые должности могли быть удалены.
+-- date — кадровая дата события, created_at — время записи; created_at
+-- из clock_timestamp(): события одной транзакции идут в порядке записи.
 CREATE TABLE collaborator_position_history (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    collaborator_id   uuid NOT NULL
-        REFERENCES collaborators ON DELETE CASCADE,
-    date              timestamptz NOT NULL,
+    collaborator_id   uuid NOT NULL REFERENCES collaborators,
+    event_type        text NOT NULL
+        CHECK ( event_type IN (
+            'assigned', 'unassigned', 'main_set', 'main_unset' ) ),
+    date              date NOT NULL,
     position_id       uuid,
     position_name     text,
     subdivision_id    uuid,
     subdivision_name  text,
     org_id            uuid,
     org_name          text,
-    comment           text
+    comment           text,
+    created_at        timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
 CREATE INDEX ON collaborator_position_history ( collaborator_id );
+CREATE INDEX ON collaborator_position_history ( position_id );
 
 
 -- Состояния сотрудника: отпуск, больничный и т. п. (history_states).
@@ -228,6 +245,184 @@ CREATE TRIGGER set_updated_at BEFORE UPDATE ON positions
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER set_updated_at BEFORE UPDATE ON func_managers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- Запись события со снимком названий должности, подразделения и
+-- организации.
+CREATE FUNCTION log_position_event(
+    p_event_type       text,
+    p_collaborator_id  uuid,
+    p_position         positions,
+    p_date             date
+) RETURNS void
+LANGUAGE sql AS $$
+    INSERT INTO collaborator_position_history (
+        collaborator_id,
+        event_type,
+        date,
+        position_id,
+        position_name,
+        subdivision_id,
+        subdivision_name,
+        org_id,
+        org_name
+    )
+    SELECT
+        p_collaborator_id,
+        p_event_type,
+        p_date,
+        p_position.id,
+        p_position.name,
+        s.id,
+        s.name,
+        o.id,
+        o.name
+    FROM subdivisions s
+    JOIN orgs o ON o.id = s.org_id
+    WHERE s.id = p_position.subdivision_id;
+$$;
+
+
+-- Физическое удаление запрещено: должность закрывают статусом, сотрудника
+-- открепляют.
+CREATE FUNCTION forbid_delete() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'Удаление из % запрещено', TG_TABLE_NAME;
+END;
+$$;
+
+
+-- Смена collaborator_id: открепление прежнего сотрудника и прикрепление
+-- нового, с датами из assignment_*_date, если их поменяли в том же
+-- запросе. Даты занятой должности без смены сотрудника не меняются —
+-- иначе они разойдутся с историей.
+CREATE FUNCTION positions_assignment() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    old_collaborator_id  uuid;
+    old_start_date       date;
+    old_finish_date      date;
+    assign_date          date := current_date;
+    unassign_date        date := current_date;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        old_collaborator_id := OLD.collaborator_id;
+        old_start_date := OLD.assignment_start_date;
+        old_finish_date := OLD.assignment_finish_date;
+    END IF;
+
+    IF NEW.collaborator_id IS NOT DISTINCT FROM old_collaborator_id THEN
+        IF NEW.collaborator_id IS NOT NULL AND (
+            NEW.assignment_start_date IS DISTINCT FROM old_start_date
+            OR NEW.assignment_finish_date IS DISTINCT FROM old_finish_date
+        ) THEN
+            RAISE EXCEPTION
+                'Даты закрепления меняются только вместе с сотрудником';
+        END IF;
+
+        RETURN NEW;
+    END IF;
+
+    IF NEW.assignment_start_date IS DISTINCT FROM old_start_date THEN
+        assign_date := coalesce( NEW.assignment_start_date, current_date );
+    END IF;
+
+    IF NEW.assignment_finish_date IS DISTINCT FROM old_finish_date THEN
+        unassign_date := coalesce( NEW.assignment_finish_date, current_date );
+    END IF;
+
+    IF old_collaborator_id IS NOT NULL THEN
+        PERFORM log_position_event(
+            'unassigned', old_collaborator_id, OLD, unassign_date );
+
+        -- До записи строки: пока должность за прежним сотрудником, ключ
+        -- main_position_id ещё действителен, а снимок для main_unset —
+        -- прежний.
+        UPDATE collaborators
+        SET main_position_id = NULL
+        WHERE id = old_collaborator_id
+            AND main_position_id = OLD.id;
+    END IF;
+
+    IF NEW.collaborator_id IS NULL THEN
+        NEW.assignment_start_date := NULL;
+        NEW.assignment_finish_date := unassign_date;
+        RETURN NEW;
+    END IF;
+
+    NEW.assignment_start_date := assign_date;
+    NEW.assignment_finish_date := NULL;
+    PERFORM log_position_event(
+        'assigned', NEW.collaborator_id, NEW, assign_date );
+
+    RETURN NEW;
+END;
+$$;
+
+
+-- Единственная должность сотрудника без основной становится основной.
+-- AFTER: составной ключ проверяет уже записанную строку должности.
+CREATE FUNCTION positions_set_main() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.collaborator_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    IF TG_OP = 'UPDATE'
+        AND NEW.collaborator_id IS NOT DISTINCT FROM OLD.collaborator_id
+    THEN
+        RETURN NULL;
+    END IF;
+
+    UPDATE collaborators c
+    SET main_position_id = NEW.id
+    WHERE c.id = NEW.collaborator_id
+        AND c.main_position_id IS NULL
+        AND (
+            SELECT count(*) FROM positions p
+            WHERE p.collaborator_id = c.id
+        ) = 1;
+
+    RETURN NULL;
+END;
+$$;
+
+
+-- Смена основной должности: main_unset по прежней, main_set по новой.
+CREATE FUNCTION collaborators_main_position_log() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    pos  positions;
+BEGIN
+    IF OLD.main_position_id IS NOT NULL THEN
+        SELECT * INTO pos FROM positions WHERE id = OLD.main_position_id;
+        PERFORM log_position_event( 'main_unset', NEW.id, pos, current_date );
+    END IF;
+
+    IF NEW.main_position_id IS NOT NULL THEN
+        SELECT * INTO pos FROM positions WHERE id = NEW.main_position_id;
+        PERFORM log_position_event( 'main_set', NEW.id, pos, current_date );
+    END IF;
+
+    RETURN NULL;
+END;
+$$;
+
+
+CREATE TRIGGER forbid_delete BEFORE DELETE ON positions
+    FOR EACH ROW EXECUTE FUNCTION forbid_delete();
+CREATE TRIGGER positions_assignment BEFORE INSERT OR UPDATE ON positions
+    FOR EACH ROW EXECUTE FUNCTION positions_assignment();
+CREATE TRIGGER positions_set_main
+    AFTER INSERT OR UPDATE OF collaborator_id ON positions
+    FOR EACH ROW EXECUTE FUNCTION positions_set_main();
+CREATE TRIGGER main_position_log
+    AFTER UPDATE OF main_position_id ON collaborators
+    FOR EACH ROW
+    WHEN ( OLD.main_position_id IS DISTINCT FROM NEW.main_position_id )
+    EXECUTE FUNCTION collaborators_main_position_log();
 
 
 -- Соответствие id WebSoft и uuid LMS. Импорт идёт только через неё:
@@ -270,7 +465,7 @@ SELECT
     o.id    AS org_id,
     o.name  AS org_name
 FROM collaborators c
-LEFT JOIN positions p ON p.collaborator_id = c.id AND p.is_main
+LEFT JOIN positions p ON p.id = c.main_position_id
 LEFT JOIN subdivisions s ON s.id = p.subdivision_id
 LEFT JOIN orgs o ON o.id = s.org_id;
 
@@ -295,9 +490,10 @@ LEFT JOIN orgs o ON o.id = s.org_id;
 --
 --   WITH RECURSIVE up AS (
 --       SELECT s.id, s.parent_id, 1 AS depth
---       FROM positions p
+--       FROM collaborators c
+--       JOIN positions p ON p.id = c.main_position_id
 --       JOIN subdivisions s ON s.id = p.subdivision_id
---       WHERE p.collaborator_id = :person_id AND p.is_main
+--       WHERE c.id = :person_id
 --       UNION ALL
 --       SELECT s.id, s.parent_id, up.depth + 1
 --       FROM subdivisions s JOIN up ON s.id = up.parent_id
